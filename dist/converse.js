@@ -48444,6 +48444,7 @@ const _converse$env = _converse_headless_converse_core__WEBPACK_IMPORTED_MODULE_
       Strophe = _converse$env.Strophe,
       $iq = _converse$env.$iq,
       b64_sha1 = _converse$env.b64_sha1,
+      f = _converse$env.f,
       sizzle = _converse$env.sizzle,
       _ = _converse$env._;
 const u = _converse_headless_converse_core__WEBPACK_IMPORTED_MODULE_0__["default"].env.utils;
@@ -48689,7 +48690,7 @@ _converse_headless_converse_core__WEBPACK_IMPORTED_MODULE_0__["default"].plugins
       initialize() {
         this.on('add', _.flow(this.openBookmarkedRoom, this.markRoomAsBookmarked));
         this.on('remove', this.markRoomAsUnbookmarked, this);
-        this.on('remove', this.sendBookmarkStanza, this);
+        this.on('remove', this.persistBookmarks, this);
 
         const storage = _converse.config.get('storage'),
               cache_key = `converse.room-bookmarks${_converse.bare_jid}`;
@@ -48735,12 +48736,175 @@ _converse_headless_converse_core__WEBPACK_IMPORTED_MODULE_0__["default"].plugins
         return deferred.resolve();
       },
 
-      createBookmark(options) {
+      async createBookmark(options) {
         this.create(options);
-        this.sendBookmarkStanza().catch(iq => this.onBookmarkError(iq, options));
+
+        try {
+          await this.persistBookmarks();
+        } catch (e) {
+          this.onBookmarkError(e, options);
+        }
       },
 
-      sendBookmarkStanza() {
+      addFormFields(stanza, config) {
+        _.each(_.keys(config), key => {
+          if (config[key].type === 'hidden') {
+            stanza.c('field', {
+              'var': key,
+              'type': 'hidden'
+            });
+          } else {
+            stanza.c('field', {
+              'var': key
+            });
+          }
+
+          if (_.isEmpty(config[key].values)) {
+            stanza.c('value').t('').up().up();
+          } else {
+            _.each(config[key].values, value => {
+              stanza.c('value').t(value).up().up();
+            });
+          }
+        });
+
+        return stanza;
+      },
+
+      createNode(jid, node, config) {
+        return _converse.api.disco.supports(Strophe.NS.PUBSUB + '#create-nodes', _converse.bare_jid).then(result => {
+          return new Promise((resolve, reject) => {
+            const stanza = $iq({
+              'type': 'set',
+              'from': _converse.connection.jid
+            }).c('pubsub', {
+              'xmlns': Strophe.NS.PUBSUB
+            }).c('create', {
+              'node': node
+            }).up();
+
+            if (config) {
+              stanza.c('configure').c('x', {
+                'xmlns': Strophe.NS.XFORM,
+                'type': 'submit'
+              });
+              this.addFormFields(stanza, config);
+            }
+
+            _converse.connection.sendIQ(stanza, resolve, resolve);
+          });
+        }).catch(_.partial(_converse.log, _, Strophe.LogLevel.FATAL));
+      },
+
+      fetchNodeConfiguration(jid, node) {
+        return new Promise((resolve, reject) => {
+          const stanza = $iq({
+            'type': 'get',
+            'from': _converse.connection.jid
+          }).c('pubsub', {
+            'xmlns': Strophe.NS.PUBSUB + '#owner'
+          }).c('configure', {
+            'node': node
+          });
+
+          _converse.connection.sendIQ(stanza, resolve, resolve);
+        }).catch(_.partial(_converse.log, _, Strophe.LogLevel.FATAL));
+      },
+
+      parseConfiguration(iq) {
+        const fields = iq.querySelectorAll('field');
+
+        const get_key_value = el => {
+          let values = _.map(_.get(el.querySelectorAll('value'), 'textContent'));
+
+          if (_.isEmpty(values)) {
+            // We need an empty `<values></values>` element if no value (and required)
+            values = [''];
+          }
+
+          return [el.getAttribute('var'), {
+            'values': values,
+            'required': !_.isNull(el.querySelector('required')),
+            'type': el.getAttribute('type')
+          }];
+        };
+
+        return f.fromPairs(f.map(get_key_value, fields));
+      },
+
+      constructConfigStanza(jid, node, config) {
+        const stanza = $iq({
+          'type': 'set',
+          'from': _converse.connection.jid,
+          'to': jid
+        }).c('pubsub', {
+          'xmlns': Strophe.NS.PUBSUB + '#owner'
+        }).c('configure', {
+          'node': node
+        }).c('x', {
+          'xmlns': Strophe.NS.XFORM,
+          'type': 'submit'
+        });
+        this.addFormFields(stanza, config);
+        return stanza;
+      },
+
+      configureNode(jid, node, config) {
+        return new Promise((resolve, reject) => {
+          _converse.connection.sendIQ(this.constructConfigStanza(jid, node, config), resolve, resolve);
+        }).catch(_.partial(_converse.log, _, Strophe.LogLevel.FATAL));
+      },
+
+      saveConfiguration(config) {
+        // FIXME: check what the config settings are before setting them
+        return this.fetchNodeConfiguration().then(this.parseConfiguration).then(config => {
+          config['pubsub#access_model'] = {
+            'values': ['whitelist']
+          };
+          config['pubsub#persist_items'] = {
+            'values': ['1']
+          }; // More compatible with older OpenFire than `true`
+
+          this.configureNode(undefined, 'storage:bookmarks', config);
+        }).catch(_.partial(_converse.log, _, Strophe.LogLevel.FATAL));
+      },
+
+      persistBookmarks() {
+        return new Promise((resolve, reject) => {
+          _converse.api.disco.supports(Strophe.NS.PUBSUB + '#publish-options', _converse.bare_jid).then(result => {
+            if (result.supported) {
+              this.sendBookmarkStanza(resolve);
+            } else {
+              const config = {
+                'FORM_TYPE': {
+                  'values': ['http://jabber.org/protocol/pubsub#node_config'],
+                  'type': 'hidden'
+                },
+                'pubsub#access_model': {
+                  'values': ['whitelist']
+                },
+                'pubsub#persist_items': {
+                  'values': ['1'] // More compatible with older OpenFire than `true`
+
+                }
+              };
+              this.fetchNodeConfiguration(undefined, 'storage:bookmarks').then(iq => {
+                if (iq.getAttribute('type') === 'error') {
+                  if (iq.querySelector('error[type="cancel"] item-not-found')) {
+                    this.createNode(undefined, 'storage:bookmarks', config).then(resolve);
+                  } else {
+                    reject(new Error("Error while trying to configure 'storage:bookmarks' PEP node"), iq);
+                  }
+                } else {
+                  this.saveConfiguration(config).then(this.sendBookmarkStanza.bind(this, resolve));
+                }
+              });
+            }
+          });
+        });
+      },
+
+      sendBookmarkStanza(callback) {
         const stanza = $iq({
           'type': 'set',
           'from': _converse.connection.jid
@@ -48760,18 +48924,21 @@ _converse_headless_converse_core__WEBPACK_IMPORTED_MODULE_0__["default"].plugins
             'jid': model.get('jid')
           }).c('nick').t(model.get('nick')).up().up();
         });
-        stanza.up().up().up();
-        stanza.c('publish-options').c('x', {
-          'xmlns': Strophe.NS.XFORM,
-          'type': 'submit'
-        }).c('field', {
-          'var': 'FORM_TYPE',
-          'type': 'hidden'
-        }).c('value').t('http://jabber.org/protocol/pubsub#publish-options').up().up().c('field', {
-          'var': 'pubsub#persist_items'
-        }).c('value').t('true').up().up().c('field', {
-          'var': 'pubsub#access_model'
-        }).c('value').t('whitelist');
+
+        _converse.api.disco.supports(Strophe.NS.PUBSUB + '#publish-options', _converse.bare_jid).then(() => {
+          stanza.up().up().up().c('publish-options').c('x', {
+            'xmlns': Strophe.NS.XFORM,
+            'type': 'submit'
+          }).c('field', {
+            'var': 'FORM_TYPE',
+            'type': 'hidden'
+          }).c('value').t('http://jabber.org/protocol/pubsub#publish-options').up().up().c('field', {
+            'var': 'pubsub#persist_items'
+          }).c('value').t('true').up().up().c('field', {
+            'var': 'pubsub#access_model'
+          }).c('value').t('whitelist');
+        });
+
         return _converse.api.sendIQ(stanza);
       },
 
@@ -48782,6 +48949,9 @@ _converse_headless_converse_core__WEBPACK_IMPORTED_MODULE_0__["default"].plugins
 
         _converse.api.alert.show(Strophe.LogLevel.ERROR, __('Error'), [__("Sorry, something went wrong while trying to save your bookmark.")]);
 
+        const model = _converse.chatboxes.get(options.jid);
+
+        model.set('bookmarked', false);
         this.findWhere({
           'jid': options.jid
         }).destroy();

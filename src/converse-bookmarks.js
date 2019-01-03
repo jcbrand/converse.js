@@ -17,7 +17,7 @@ import tpl_bookmarks_list from "templates/bookmarks_list.html"
 import tpl_chatroom_bookmark_form from "templates/chatroom_bookmark_form.html";
 import tpl_chatroom_bookmark_toggle from "templates/chatroom_bookmark_toggle.html";
 
-const { Backbone, Promise, Strophe, $iq, b64_sha1, sizzle, _ } = converse.env;
+const { Backbone, Promise, Strophe, $iq, b64_sha1, f, sizzle, _ } = converse.env;
 const u = converse.env.utils;
 
 
@@ -239,7 +239,7 @@ converse.plugins.add('converse-bookmarks', {
             initialize () {
                 this.on('add', _.flow(this.openBookmarkedRoom, this.markRoomAsBookmarked));
                 this.on('remove', this.markRoomAsUnbookmarked, this);
-                this.on('remove', this.sendBookmarkStanza, this);
+                this.on('remove', this.persistBookmarks, this);
 
                 const storage = _converse.config.get('storage'),
                       cache_key = `converse.room-bookmarks${_converse.bare_jid}`;
@@ -280,17 +280,136 @@ converse.plugins.add('converse-bookmarks', {
                 return deferred.resolve();
             },
 
-            createBookmark (options) {
+            async createBookmark (options) {
                 this.create(options);
-                this.sendBookmarkStanza().catch(iq => this.onBookmarkError(iq, options));
+                try {
+                    await this.persistBookmarks();
+                } catch (e) {
+                    this.onBookmarkError(e, options);
+                }
             },
 
-            sendBookmarkStanza () {
+            addFormFields (stanza, config) {
+                _.each(_.keys(config), (key) => {
+                    if (config[key].type === 'hidden') {
+                        stanza.c('field', {'var': key, 'type': 'hidden'});
+                    } else {
+                        stanza.c('field', {'var': key});
+                    }
+                    if (_.isEmpty(config[key].values)) {
+                        stanza.c('value').t('').up().up();
+                    } else {
+                        _.each(config[key].values, (value) => {
+                            stanza.c('value').t(value).up().up();
+                        });
+                    }
+                });
+                return stanza;
+            },
+
+            async createNode (jid, node, config) {
+                const result = await _converse.api.disco.supports(Strophe.NS.PUBSUB+'#create-nodes', _converse.bare_jid);
+                if (!result.supported) {
+                    throw new Error("Node creation not supported");
+                }
+                const stanza = $iq({
+                    'type': 'set',
+                    'from': _converse.connection.jid
+                }).c('pubsub', {'xmlns': Strophe.NS.PUBSUB})
+                    .c('create', {'node': node}).up();
+
+                if (config) {
+                    stanza.c('configure').c('x', {'xmlns': Strophe.NS.XFORM, 'type': 'submit'});
+                    this.addFormFields(stanza, config);
+                }
+                return _converse.api.sendIQ(stanza);
+            },
+
+            fetchNodeConfiguration (node) {
+                const stanza = $iq({
+                    'type': 'get',
+                    'from': _converse.connection.jid
+                }).c('pubsub', {'xmlns': Strophe.NS.PUBSUB+'#owner'})
+                    .c('configure', {'node': node});
+                return _converse.api.sendIQ(stanza);
+            },
+
+            parseConfiguration (iq) {
+                const fields = iq.querySelectorAll('field');
+                const get_key_value = (el) => {
+                    let values = _.map(_.get(el.querySelectorAll('value'), 'textContent'));
+                    if (_.isEmpty(values)) {
+                        // We need an empty `<values></values>` element if no value (and required)
+                        values = [''];
+                    }
+                    return [
+                        el.getAttribute('var'),
+                        {
+                            'values': values,
+                            'required': !_.isNull(el.querySelector('required')),
+                            'type': el.getAttribute('type')
+                        }
+                    ];
+                }
+                return f.fromPairs(f.map(get_key_value, fields));
+            },
+
+            constructConfigStanza (jid, node, config) {
+                const stanza = $iq({
+                    'type': 'set',
+                    'from': _converse.connection.jid,
+                    'to': jid
+                }).c('pubsub', {'xmlns': Strophe.NS.PUBSUB+'#owner'})
+                    .c('configure', {'node': node})
+                        .c('x', {'xmlns': Strophe.NS.XFORM, 'type': 'submit'});
+                this.addFormFields(stanza, config);
+                return stanza;
+            },
+
+            configureNode (jid, node, config) {
+                return new Promise((resolve, reject) => {
+                    _converse.connection.sendIQ(this.constructConfigStanza(jid, node, config), resolve, resolve);
+                }).catch(_.partial(_converse.log, _, Strophe.LogLevel.FATAL));
+            },
+
+            async saveConfiguration () {
+                // FIXME: check what the config settings are before setting them
+                const iq = await this.fetchNodeConfiguration();
+                const config = this.parseConfiguration(iq);
+                config['pubsub#access_model'] = {'values': ['whitelist']};
+                config['pubsub#persist_items'] = {'values': ['1']}; // More compatible with older OpenFire than `true`
+                this.configureNode(undefined, 'storage:bookmarks', config);
+            },
+
+            async persistBookmarks () {
+                const result = await _converse.api.disco.supports(Strophe.NS.PUBSUB+'#publish-options', _converse.bare_jid);
+                if (result.supported) {
+                    return this.sendBookmarkStanza();
+                } else {
+                    const config = {
+                        'FORM_TYPE': {'values': ['http://jabber.org/protocol/pubsub#node_config'], 'type': 'hidden'},
+                        'pubsub#access_model': {'values': ['whitelist']},
+                        'pubsub#persist_items': {'values': ['1']} // More compatible with older OpenFire than `true`
+                    }
+                    const iq = await this.fetchNodeConfiguration('storage:bookmarks');
+                    if (iq.getAttribute('type') === 'error') {
+                        if (iq.querySelector('error[type="cancel"] item-not-found')) {
+                            return this.createNode(undefined, 'storage:bookmarks', config);
+                        } else {
+                            throw new Error("Error while trying to configure 'storage:bookmarks' PEP node");
+                        }
+                    } else {
+                        await this.saveConfiguration(config);
+                        return this.sendBookmarkStanza();
+                    }
+                }
+            },
+
+            async sendBookmarkStanza () {
                 const stanza = $iq({
                         'type': 'set',
                         'from': _converse.connection.jid,
-                    })
-                    .c('pubsub', {'xmlns': Strophe.NS.PUBSUB})
+                    }).c('pubsub', {'xmlns': Strophe.NS.PUBSUB})
                         .c('publish', {'node': 'storage:bookmarks'})
                             .c('item', {'id': 'current'})
                                 .c('storage', {'xmlns':'storage:bookmarks'});
@@ -301,15 +420,18 @@ converse.plugins.add('converse-bookmarks', {
                         'jid': model.get('jid'),
                     }).c('nick').t(model.get('nick')).up().up();
                 });
-                stanza.up().up().up();
-                stanza.c('publish-options')
-                    .c('x', {'xmlns': Strophe.NS.XFORM, 'type':'submit'})
-                        .c('field', {'var':'FORM_TYPE', 'type':'hidden'})
-                            .c('value').t('http://jabber.org/protocol/pubsub#publish-options').up().up()
-                        .c('field', {'var':'pubsub#persist_items'})
-                            .c('value').t('true').up().up()
-                        .c('field', {'var':'pubsub#access_model'})
-                            .c('value').t('whitelist');
+
+                const result = await _converse.api.disco.supports(Strophe.NS.PUBSUB+'#publish-options', _converse.bare_jid);
+                if (result.supported) {
+                    stanza.up().up().up().c('publish-options')
+                        .c('x', {'xmlns': Strophe.NS.XFORM, 'type':'submit'})
+                            .c('field', {'var':'FORM_TYPE', 'type':'hidden'})
+                                .c('value').t('http://jabber.org/protocol/pubsub#publish-options').up().up()
+                            .c('field', {'var':'pubsub#persist_items'})
+                                .c('value').t('true').up().up()
+                            .c('field', {'var':'pubsub#access_model'})
+                                .c('value').t('whitelist');
+                }
                 return _converse.api.sendIQ(stanza);
             },
 
@@ -320,6 +442,8 @@ converse.plugins.add('converse-bookmarks', {
                     Strophe.LogLevel.ERROR,
                     __('Error'), [__("Sorry, something went wrong while trying to save your bookmark.")]
                 )
+                const model = _converse.chatboxes.get(options.jid);
+                model.set('bookmarked', false);
                 this.findWhere({'jid': options.jid}).destroy();
             },
 
@@ -330,8 +454,8 @@ converse.plugins.add('converse-bookmarks', {
                 }).c('pubsub', {'xmlns': Strophe.NS.PUBSUB})
                     .c('items', {'node': 'storage:bookmarks'});
                 _converse.api.sendIQ(stanza)
-                    .then((iq) => this.onBookmarksReceived(deferred, iq))
-                    .catch((iq) => this.onBookmarksReceivedError(deferred, iq)
+                    .then(iq => this.onBookmarksReceived(deferred, iq))
+                    .catch(iq => this.onBookmarksReceivedError(deferred, iq)
                 );
             },
 
@@ -561,14 +685,12 @@ converse.plugins.add('converse-bookmarks', {
         _converse.on('connected', () => {
             // Add a handler for bookmarks pushed from other connected clients
             // (from the same user obviously)
-            _converse.connection.addHandler((message) => {
+            _converse.connection.addHandler(async message => {
                 if (sizzle('event[xmlns="'+Strophe.NS.PUBSUB+'#event"] items[node="storage:bookmarks"]', message).length) {
-                    _converse.api.waitUntil('bookmarksInitialized')
-                        .then(() => _converse.bookmarks.createBookmarksFromStanza(message))
-                        .catch(_.partial(_converse.log, _, Strophe.LogLevel.FATAL));
+                    await _converse.api.waitUntil('bookmarksInitialized');
+                    _converse.bookmarks.createBookmarksFromStanza(message)
                 }
             }, null, 'message', 'headline', null, _converse.bare_jid);
         });
-
     }
 });

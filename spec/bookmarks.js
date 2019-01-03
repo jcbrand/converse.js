@@ -20,8 +20,8 @@
     describe("A chat room", function () {
 
         it("can be bookmarked", mock.initConverseWithPromises(
-            null, ['rosterGroupsFetched'], {},
-            async function (done, _converse) {
+                null, ['rosterGroupsFetched'], {},
+                async function (done, _converse) {
                 
             await test_utils.waitUntilDiscoConfirmed(
                 _converse, _converse.bare_jid,
@@ -140,6 +140,224 @@
             done();
         }));
 
+
+        describe("when publish-options is not supported", function () {
+
+            it("can not be bookmarked if the node can't be configured", mock.initConverseWithPromises(
+                null, ['rosterGroupsFetched'], {}, function (done, _converse) {
+
+                test_utils.waitUntilDiscoConfirmed(
+                    _converse, _converse.bare_jid,
+                    [{'category': 'pubsub', 'type': 'pep'}],
+                    ['http://jabber.org/protocol/pubsub#create-nodes']
+                ).then(function () {
+                    var sent_stanza, IQ_id;
+                    var sendIQ = _converse.connection.sendIQ;
+                    spyOn(_converse.connection, 'sendIQ').and.callFake(function (iq, callback, errback) {
+                        sent_stanza = iq;
+                        IQ_id = sendIQ.bind(this)(iq, callback, errback);
+                    });
+                    spyOn(_converse.connection, 'getUniqueId').and.callThrough();
+
+                    test_utils.openChatRoom(_converse, 'theplay', 'conference.shakespeare.lit', 'JC');
+                    var jid = 'theplay@conference.shakespeare.lit';
+                    var view = _converse.chatboxviews.get(jid);
+                    spyOn(view, 'renderBookmarkForm').and.callThrough();
+                    spyOn(view, 'closeForm').and.callThrough();
+
+                    test_utils.waitUntil(function () {
+                        return !_.isNull(view.el.querySelector('.toggle-bookmark'));
+                    }, 300).then(function () {
+                        expect(view.model.get('bookmarked')).toBeFalsy();
+
+                        /* Client uploads data:
+                         * --------------------
+                         *  <iq from='juliet@capulet.lit/balcony' type='set' id='pip1'>
+                         *      <pubsub xmlns='http://jabber.org/protocol/pubsub'>
+                         *          <publish node='storage:bookmarks'>
+                         *              <item id='current'>
+                         *                  <storage xmlns='storage:bookmarks'>
+                         *                      <conference name='The Play&apos;s the Thing'
+                         *                                  autojoin='true'
+                         *                                  jid='theplay@conference.shakespeare.lit'>
+                         *                          <nick>JC</nick>
+                         *                      </conference>
+                         *                  </storage>
+                         *              </item>
+                         *          </publish>
+                         *      </pubsub>
+                         *  </iq>
+                         */
+                        var $bookmark = $(view.el).find('.toggle-bookmark');
+                        $bookmark[0].click();
+                        expect(view.renderBookmarkForm).toHaveBeenCalled();
+
+                        var $form = $(view.el).find('.chatroom-form');
+                        $form.find('input[name="name"]').val('Play&apos;s the Thing');
+                        $form.find('input[name="autojoin"]').prop('checked', true);
+                        $form.find('input[name="nick"]').val('JC');
+                        view.el.querySelector('.btn-primary').click();
+
+                        expect(view.model.get('bookmarked')).toBeTruthy();
+                        expect(_converse.bookmarks.models.length).toBe(1);
+                        expect($bookmark.hasClass('on-button'), true);
+
+                        return test_utils.waitUntil(function () {
+                            return sent_stanza.toLocaleString() ===
+                                "<iq type='get' from='dummy@localhost/resource' xmlns='jabber:client' id='"+IQ_id+"'>"+
+                                    "<pubsub xmlns='http://jabber.org/protocol/pubsub#owner'>" +
+                                        "<configure node='storage:bookmarks'/>" +
+                                    "</pubsub>" +
+                                "</iq>";
+                        });
+                    }).then(function () {
+                        /* Server says that the node may not be configured
+                         *
+                         * <iq type='error'
+                         *      from='hamlet@denmark.lit/elsinore'
+                         *      to='pubsub.shakespeare.lit'
+                         *      id='config1'>
+                         *  <error type='cancel'>
+                         *      <not-allowed xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/>
+                         *  </error>
+                         *  </iq>
+                         */
+                        var stanza = $iq({
+                            'to': _converse.connection.jid,
+                            'type': 'error',
+                            'id': IQ_id
+                        }).c('error', {'type': 'cancel'})
+                        .c('not-allowed', {'xmlns': 'urn:ietf:params:xml:ns:xmpp-stanzas'});
+                        _converse.connection._dataRecv(test_utils.createRequest(stanza));
+
+                        // TODO: check that the bookmark toggle goes off.
+
+                        return test_utils.waitUntil(function () {
+                            return !view.model.get('bookmarked');
+                        });
+                    }).then(function () {
+                        // TODO: show erorr modal
+                        expect(_converse.bookmarks.models.length).toBe(0);
+                        done();
+                    });
+                });
+            }));
+
+            describe("and no PEP node exists", function () {
+
+                it("can still be bookmarked if the node can be created", mock.initConverseWithPromises(
+                    null, ['rosterGroupsFetched'], {}, function (done, _converse) {
+
+                    test_utils.waitUntilDiscoConfirmed(
+                        _converse, _converse.bare_jid,
+                        [{'category': 'pubsub', 'type': 'pep'}],
+                        ['http://jabber.org/protocol/pubsub#create-nodes']
+                    ).then(function () {
+                        var sent_stanza, IQ_id;
+                        var sendIQ = _converse.connection.sendIQ;
+                        spyOn(_converse.connection, 'sendIQ').and.callFake(function (iq, callback, errback) {
+                            sent_stanza = iq;
+                            IQ_id = sendIQ.bind(this)(iq, callback, errback);
+                        });
+                        spyOn(_converse.connection, 'getUniqueId').and.callThrough();
+
+                        test_utils.openChatRoom(_converse, 'theplay', 'conference.shakespeare.lit', 'JC');
+                        var jid = 'theplay@conference.shakespeare.lit';
+                        var view = _converse.chatboxviews.get(jid);
+                        spyOn(view, 'renderBookmarkForm').and.callThrough();
+                        spyOn(view, 'closeForm').and.callThrough();
+
+                        test_utils.waitUntil(function () {
+                            return !_.isNull(view.el.querySelector('.toggle-bookmark'));
+                        }, 300).then(function () {
+                            expect(view.model.get('bookmarked')).toBeFalsy();
+
+                            /* Client uploads data:
+                             * --------------------
+                             *  <iq from='juliet@capulet.lit/balcony' type='set' id='pip1'>
+                             *      <pubsub xmlns='http://jabber.org/protocol/pubsub'>
+                             *          <publish node='storage:bookmarks'>
+                             *              <item id='current'>
+                             *                  <storage xmlns='storage:bookmarks'>
+                             *                      <conference name='The Play&apos;s the Thing'
+                             *                                  autojoin='true'
+                             *                                  jid='theplay@conference.shakespeare.lit'>
+                             *                          <nick>JC</nick>
+                             *                      </conference>
+                             *                  </storage>
+                             *              </item>
+                             *          </publish>
+                             *      </pubsub>
+                             *  </iq>
+                             */
+                            var $bookmark = $(view.el).find('.toggle-bookmark');
+                            $bookmark[0].click();
+                            expect(view.renderBookmarkForm).toHaveBeenCalled();
+
+                            var $form = $(view.el).find('.chatroom-form');
+                            $form.find('input[name="name"]').val('Play&apos;s the Thing');
+                            $form.find('input[name="autojoin"]').prop('checked', true);
+                            $form.find('input[name="nick"]').val('JC');
+                            view.el.querySelector('.btn-primary').click();
+
+                            expect(view.model.get('bookmarked')).toBeTruthy(); // FIXME: this should be reset when bookmarking fails
+                            expect($bookmark.hasClass('on-button'), true);
+
+                            return test_utils.waitUntil(function () {
+                                return sent_stanza.toLocaleString() ===
+                                    "<iq type='get' from='dummy@localhost/resource' xmlns='jabber:client' id='"+IQ_id+"'>"+
+                                        "<pubsub xmlns='http://jabber.org/protocol/pubsub#owner'>" +
+                                            "<configure node='storage:bookmarks'/>" +
+                                        "</pubsub>" +
+                                    "</iq>";
+                            });
+                        }).then(function () {
+                            /* Server says that the node doesn't exist.
+                             *  <iq type='error'
+                             *      from='pubsub.shakespeare.lit'
+                             *      to='hamlet@denmark.lit/elsinore'
+                             *      id='config1'>
+                             *        <error type='cancel'>
+                             *          <item-not-found xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/>
+                             *        </error>
+                             *  </iq>
+                             */
+                            var stanza = $iq({
+                                'to': _converse.connection.jid,
+                                'type': 'error',
+                                'id': IQ_id
+                            }).c('error', {'type': 'cancel'})
+                            .c('item-not-found', {'xmlns': 'urn:ietf:params:xml:ns:xmpp-stanzas'});
+                            _converse.connection._dataRecv(test_utils.createRequest(stanza));
+
+                            return test_utils.waitUntil(function () {
+                                return sent_stanza.nodeTree.getAttribute('type') === 'set';
+                            });
+                        }).then(function () {
+                            // Converse.js creates and configures the node in one go.
+                            expect(sent_stanza.toLocaleString()).toBe(
+                                "<iq type='set' from='dummy@localhost/resource' xmlns='jabber:client' id='"+IQ_id+"'>"+
+                                    "<pubsub xmlns='http://jabber.org/protocol/pubsub'>" +
+                                        "<create node='storage:bookmarks'/>" +
+                                        "<configure>" +
+                                            "<x xmlns='jabber:x:data' type='submit'>"+
+                                                "<field var='FORM_TYPE' type='hidden'>"+
+                                                    "<value>http://jabber.org/protocol/pubsub#node_config</value>"+
+                                                "</field>"+
+                                                "<field var='pubsub#access_model'><value>whitelist</value></field>"+
+                                                "<field var='pubsub#persist_items'><value>1</value></field>"+
+                                            "</x>"+
+                                        "</configure>" +
+                                    "</pubsub>" +
+                                "</iq>");
+                            expect(view.model.get('bookmarked')).toBeTruthy();
+                            expect(_converse.bookmarks.models.length).toBe(1);
+                            done();
+                        });
+                    });
+                }));
+            })
+        });
 
         it("will be automatically opened if 'autojoin' is set on the bookmark", mock.initConverseWithPromises(
             null, ['rosterGroupsFetched'], {},
