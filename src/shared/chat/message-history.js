@@ -60,7 +60,7 @@ function getDayIndicator (model) {
         return tpl_new_day({
             'type': 'date',
             'time': day_date.toISOString(),
-            'datestring': day_date.format("dddd MMM Do YYYY")
+            'datestring': day_date.format("dddd ll").replace(',', '')
         });
     }
 }

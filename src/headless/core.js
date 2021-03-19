@@ -6,6 +6,7 @@ import './polyfill';
 import Storage from '@converse/skeletor/src/storage.js';
 import _converse from '@converse/headless/shared/_converse';
 import advancedFormat from 'dayjs/plugin/advancedFormat';
+import localizedFormat from 'dayjs/plugin/localizedFormat';
 import dayjs from 'dayjs';
 import debounce from 'lodash/debounce';
 import i18n from '@converse/headless/shared/i18n';
@@ -41,6 +42,7 @@ export { _converse };
 export { i18n };
 
 dayjs.extend(advancedFormat);
+dayjs.extend(localizedFormat);
 
 // Add Strophe Namespaces
 Strophe.addNamespace('CARBONS', 'urn:xmpp:carbons:2');
