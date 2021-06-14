@@ -42,7 +42,7 @@ Removed events:
 The `chatBoxClosed`, `chatBoxMaximized` and `chatBoxMinimized` events now have the `model` as
 payload and not the `view`.
 
-## 7.0.6 (unreleased)
+## 7.0.6 (2021-06-11)
 
 - #2500: Wrong assignment in OMEMO code
 
