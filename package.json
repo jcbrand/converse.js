@@ -114,6 +114,7 @@
     "bootstrap.native": "^2.0.27",
     "favico.js-slevomat": "^0.3.11",
     "jed": "1.1.1",
+    "libgif": "0.0.3",
     "lit": "^2.0.0-rc.2",
     "xss": "^1.0.8"
   }

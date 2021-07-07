@@ -1,7 +1,9 @@
 import log from '@converse/headless/log';
 import tpl_audio from 'templates/audio.js';
+import tpl_gif from 'templates/gif.js';
 import tpl_image from 'templates/image.js';
 import tpl_video from 'templates/video.js';
+import { URL_PARSE_OPTIONS } from '@converse/headless/shared/constants.js';
 import { _converse, api, converse } from '@converse/headless/core';
 import { containsDirectives, getDirectiveAndLength, getDirectiveTemplate, isQuoteDirective } from './styling.js';
 import { getHyperlinkTemplate } from 'utils/html.js';
@@ -16,6 +18,7 @@ import {
     isAudioDomainAllowed,
     isAudioURL,
     isEncryptedFileURL,
+    isGIFURL,
     isImageDomainAllowed,
     isImageURL,
     isVideoDomainAllowed,
@@ -94,7 +97,6 @@ export class RichText extends String {
      */
     addHyperlinks (text, offset) {
         const objs = [];
-        const parse_options = { 'start': /\b(?:([a-z][a-z0-9.+-]*:\/\/)|xmpp:|mailto:|www\.)/gi };
         try {
             URI.withinString(
                 text,
@@ -102,7 +104,7 @@ export class RichText extends String {
                     objs.push({ url, start, end });
                     return url;
                 },
-                parse_options
+                URL_PARSE_OPTIONS
             );
         } catch (error) {
             log.debug(error);
@@ -110,10 +112,17 @@ export class RichText extends String {
         }
 
         objs.filter(o => !isEncryptedFileURL(text.slice(o.start, o.end))).forEach(url_obj => {
-            const url_text = text.slice(url_obj.start, url_obj.end);
+            const url_text = url_obj.url;
             const filtered_url = filterQueryParamsFromURL(url_text);
             let template;
-            if (this.show_images && isImageURL(url_text) && isImageDomainAllowed(url_text)) {
+
+            if (this.show_images && isGIFURL(url_text) && isImageDomainAllowed(url_text)) {
+                template = tpl_gif({
+                    'url': filtered_url,
+                    'onClick': this.onImgClick,
+                    'onLoad': this.onImgLoad
+                });
+            } else if (this.show_images && isImageURL(url_text) && isImageDomainAllowed(url_text)) {
                 template = tpl_image({
                     'url': filtered_url,
                     'onClick': this.onImgClick,

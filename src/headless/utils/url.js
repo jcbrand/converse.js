@@ -85,6 +85,10 @@ export function isURLWithImageExtension (url) {
     return checkFileTypes(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.svg'], url);
 }
 
+export function isGIFURL (url) {
+    return checkFileTypes(['.gif'], url);
+}
+
 export function isAudioURL (url) {
     return checkFileTypes(['.ogg', '.mp3', '.m4a'], url);
 }

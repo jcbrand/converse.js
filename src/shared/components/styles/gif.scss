@@ -1,0 +1,56 @@
+img.gif {
+	visibility: hidden;
+}
+
+.gifcontrol {
+	cursor: pointer;
+	transition: background 0.25s ease-in-out;
+	z-index: 100;
+    display: inline-block;
+    position: relative;
+
+	&:after {
+		transition: background 0.25s ease-in-out;
+		position: absolute;
+		content: "";
+		display: block;
+		left: calc(50% - 25px);
+		top: calc(50% - 25px);
+	}
+
+	&.loading {
+		background: rgba(255, 255, 255, 0.75);
+		&:after {
+			background: #FFF;
+			width: 50px;
+			height: 50px;
+			border-radius: 50px;
+		}
+	}
+
+	&.playing {
+		/* Only show the 'stop' button on hover */
+		&:after {
+			opacity: 0;
+			transition: opacity 0.25s ease-in-out;
+			border-left: 20px solid #FFF;
+			border-right: 20px solid #FFF;
+			width: 50px;
+			height: 50px;
+		}
+		&:hover:after {
+			opacity: 1;
+		}
+	}
+
+	&.paused {
+		background: rgba(255, 255, 255, 0.5);
+		&:after {
+			width: 0;
+			height: 0;
+			border-style: solid;
+			border-width: 25px 0 25px 50px;
+			border-color: transparent transparent transparent #fff;
+		}
+	}
+}

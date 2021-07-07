@@ -3,6 +3,7 @@ import dayjs from 'dayjs';
 import log from '@converse/headless/log';
 import sizzle from 'sizzle';
 import { Strophe } from 'strophe.js/src/strophe';
+import { URL_PARSE_OPTIONS } from '@converse/headless/shared/constants.js';
 import { _converse, api } from '@converse/headless/core';
 import { decodeHTMLEntities } from '@converse/headless/shared/utils';
 import { rejectMessage } from '@converse/headless/shared/actions';
@@ -182,7 +183,6 @@ export function getMediaURLs (text) {
     if (!text) {
         return {};
     }
-    const parse_options = { 'start': /\b(?:([a-z][a-z0-9.+-]*:\/\/)|xmpp:|mailto:|www\.)/gi };
     try {
         URI.withinString(
             text,
@@ -190,7 +190,7 @@ export function getMediaURLs (text) {
                 objs.push({ url, start, end });
                 return url;
             },
-            parse_options
+            URL_PARSE_OPTIONS
         );
     } catch (error) {
         log.debug(error);

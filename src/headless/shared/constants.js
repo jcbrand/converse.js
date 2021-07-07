@@ -12,3 +12,6 @@ CONNECTION_STATUS[Strophe.Status.DISCONNECTING] = 'DISCONNECTING';
 CONNECTION_STATUS[Strophe.Status.ERROR] = 'ERROR';
 CONNECTION_STATUS[Strophe.Status.RECONNECTING] = 'RECONNECTING';
 CONNECTION_STATUS[Strophe.Status.REDIRECT] = 'REDIRECT';
+
+
+export const URL_PARSE_OPTIONS = { 'start': /\b(?:([a-z][a-z0-9.+-]*:\/\/)|xmpp:|mailto:|www\.)/gi };
