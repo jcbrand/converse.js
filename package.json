@@ -96,7 +96,7 @@
     "po2json": "^1.0.0-beta",
     "postcss-clean": "^1.2.2",
     "postcss-loader": "^6.1.1",
-    "prettierx": "^0.18.2",
+    "prettierx": "^0.19.0",
     "run-headless-chromium": "^0.1.1",
     "sass": "^1.35.2",
     "sass-loader": "^11.0.1",
