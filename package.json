@@ -108,7 +108,7 @@
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "5.14.0",
-    "bootstrap": "^4.6.0",
+    "bootstrap": "^5.0.2",
     "bootstrap.native": "^2.0.27",
     "dompurify": "^2.3.0",
     "favico.js-slevomat": "^0.3.11",
