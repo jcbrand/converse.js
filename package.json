@@ -99,7 +99,7 @@
     "prettierx": "^0.18.2",
     "run-headless-chromium": "^0.1.1",
     "sass": "^1.35.2",
-    "sass-loader": "^11.0.1",
+    "sass-loader": "^12.1.0",
     "style-loader": "^3.1.0",
     "webpack": "^5.36.1",
     "webpack-cli": "^4.7.2",
