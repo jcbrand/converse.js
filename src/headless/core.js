@@ -106,7 +106,7 @@ const CORE_PLUGINS = [
 ];
 
 
-_converse.VERSION_NAME = "v7.0.3dev";
+_converse.VERSION_NAME = "v8.0.0dev";
 
 Object.assign(_converse, Events);
 
